@@ -1,5 +1,5 @@
-# Faro Fino - Versão Final 2.0
-# Corrige o SyntaxError na montagem da URL de busca.
+# Faro Fino - Versão Final 2.1
+# Corrige o SyntaxError de forma definitiva.
 
 import os
 import json
@@ -45,13 +45,15 @@ async def fetch_news(keywords: list):
     news_items = []
     if not keywords: return news_items
     
-    # --- CORREÇÃO DO SYNTAXERROR ---
-    # Monta a query de forma segura, usando aspas simples e duplas corretamente.
+    # --- CORREÇÃO DEFINITIVA DO SYNTAXERROR ---
+    # Monta a query sem usar f-string complexa para garantir compatibilidade.
     query_parts = [f'"{k}"' for k in keywords]
     query = " OR ".join(query_parts)
-    # Codifica a query para ser usada em uma URL
     encoded_query = quote(query)
-    url = f"https://news.google.com/rss/search?q={encoded_query}&hl=pt-BR&gl=BR&ceid=BR:pt-419&tbs=qdr:h"
+    
+    base_url = "https://news.google.com/rss/search?q="
+    params = f"&hl=pt-BR&gl=BR&ceid=BR:pt-419&tbs=qdr:h"
+    url = base_url + encoded_query + params
     # --- FIM DA CORREÇÃO ---
 
     try:
@@ -68,11 +70,11 @@ async def fetch_news(keywords: list):
 async def process_news(bot: Bot):
     config = load_config()
     owner_id, keywords = config.get("owner_id"), config.get("keywords")
-    if not owner_id or not keywords or not config.get("monitoring_on"):
-        if config.get("monitoring_on"):
-            await bot.send_message(chat_id=owner_id, text="_[Auto] Verificação pulada. Adicione palavras-chave._", parse_mode=ParseMode.MARKDOWN)
-        return
+    if not owner_id or not keywords: return
     
+    if not config.get("monitoring_on", False):
+        return
+
     found_news = await fetch_news(keywords)
     new_articles = []
     date_limit = datetime.now(TIMEZONE_BR) - timedelta(days=3)
@@ -95,13 +97,9 @@ async def process_news(bot: Bot):
             await asyncio.sleep(1)
 
     save_config(config)
-    ping_msg = f"_[Auto] Verificação concluída. {len(new_articles)} novas notícias._"
-    await bot.send_message(chat_id=owner_id, text=ping_msg, parse_mode=ParseMode.MARKDOWN)
 
 # --- LOOP PRINCIPAL E HANDLERS ---
 async def handle_updates(bot: Bot, update: Update):
-    # Esta função agora é um dispatcher simples
-    # O contexto é criado aqui para garantir que os handlers tenham o que precisam
     context = ContextTypes.DEFAULT_TYPE(application=Application.builder().token(BOT_TOKEN).build(), chat_id=update.effective_chat.id, user_id=update.effective_user.id)
     if update.message and update.message.text:
         text = update.message.text
@@ -109,7 +107,6 @@ async def handle_updates(bot: Bot, update: Update):
         elif text.startswith('/monitoramento'): await toggle_monitoring(update, context)
         elif text.startswith('/verificar'): await check_now(update, context)
         elif text.startswith(('@', '#')): await text_handler(update, context)
-        # Adicione outros comandos aqui...
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     config = load_config()
@@ -158,7 +155,6 @@ async def main():
     
     logger.info("🚀 Faro Fino - Edição Simplificada iniciada!")
 
-    # Limpa atualizações pendentes
     updates = await bot.get_updates(offset=-1, timeout=1)
     if updates:
         update_id = updates[-1].update_id + 1
@@ -170,10 +166,7 @@ async def main():
                 update_id = update.update_id + 1
                 await handle_updates(bot, update)
             
-            # Executa a verificação de notícias no mesmo loop
             await process_news(bot)
-            
-            # Pausa antes do próximo ciclo completo
             await asyncio.sleep(MONITORAMENTO_INTERVAL)
         except Exception as e:
             logger.error(f"Erro no loop principal: {e}")
